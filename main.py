@@ -1,119 +1,79 @@
-# main.py
 import os
 import sys
 from dotenv import load_dotenv
 from crewai import Crew, Process
-from models import DynamicExtractionResult
 
-# Import our custom modules
 from llm_wrappers import GeminiLLM
 from content_processing import extract_text_from_file
-from agents import create_dynamic_extractor_agent, create_validator_agent
-from tasks import create_dynamic_extraction_task, create_validation_task
+from agents import (
+    create_classifier_agent,
+    create_validator_agent,
+    create_extraction_agent,
+    create_reviewer_agent,
+    create_consolidator_agent
+)
+from tasks import (
+    create_classification_task,
+    create_validation_task,
+    create_extraction_task,
+    create_review_task,
+    create_consolidation_task
+)
 
-def print_dynamic_summary(result: DynamicExtractionResult):
-    """Takes the final Pydantic object and prints a dynamic report."""
-    
-    entities = result.extracted_entities
-    
-    # Organize keys into categories for cleaner printing (optional but nice)
-    categories = {
-        "Parties / People": ["seller", "buyer", "vendor", "lender", "borrower"],
-        "Addresses": ["address"],
-        "Dates": ["date"],
-        "Financials": ["amount", "total", "subtotal", "tax", "price", "rate", "interest"],
-        "Identifiers": ["number", "id", "mic"]
-    }
-
-    # Group entities by category
-    grouped_entities = {cat: {} for cat in categories}
-    other_entities = {}
-
-    for key, value in entities.items():
-        if not value: continue # Skip empty values
-        
-        found = False
-        for cat, keywords in categories.items():
-            if any(keyword in key.lower() for keyword in keywords):
-                grouped_entities[cat][key] = value
-                found = True
-                break
-        if not found:
-            other_entities[key] = value
-            
-    # Print the report
-    for cat, items in grouped_entities.items():
-        if items:
-            print(f"{cat}:")
-            for key, value in items.items():
-                # Clean up the key for printing and format the value
-                display_key = key.replace("_", " ").title()
-                if isinstance(value, float):
-                    display_value = f"${value:,.2f}"
-                else:
-                    display_value = str(value).replace('\n', ', ')
-                print(f"  - {display_key}: {display_value}")
-            print() # Add a newline for spacing
-
-    if other_entities:
-        print("Other Information:")
-        for key, value in other_entities.items():
-            display_key = key.replace("_", " ").title()
-            display_value = str(value).replace('\n', ', ')
-            print(f"  - {display_key}: {display_value}")
-        print()
-        
-    print("--- Reviewer Comments ---")
-    print(f"{result.review_summary}")
-
-
-# --- SETUP & EXECUTION (This part remains mostly the same) ---
-
+# --- SETUP & PRE-PROCESSING ---
 load_dotenv()
-file_path = "image.jpg"
-# file_path = "Acord_PDF.pdf"
-# file_path = "Invoice_sample1.png"
+file_path = "Acord_PDF.pdf"
 if not os.path.exists(file_path):
     sys.exit(f"[FATAL ERROR] File not found: {file_path}")
 
-print(f"Processing document: {file_path}")
+print(f"Processing document: {file_path}") # extract text from the file
 invoice_text = extract_text_from_file(file_path)
 if "Error:" in invoice_text:
     sys.exit(f"[FATAL ERROR] {invoice_text}")
 
+# --- INITIALIZE THE CREW ---
 llm = GeminiLLM()
 print(f"LLM Initialized: {llm.model}")
 
-# Create the new dynamic agents and tasks
-extractor_agent = create_dynamic_extractor_agent(llm)
-validator_agent = create_validator_agent(llm)
-print("Agents are defined.")
+# Create the full agent workforce
+classifier = create_classifier_agent(llm)
+validator = create_validator_agent(llm)
+extractor = create_extraction_agent(llm)
+reviewer = create_reviewer_agent(llm)
+consolidator = create_consolidator_agent(llm)
+print("All agents are defined.")
 
-extraction_task = create_dynamic_extraction_task(extractor_agent)
-validation_task = create_validation_task(validator_agent, context_task=extraction_task)
-print("Tasks are defined.")
+# Create the full task pipeline
+task1 = create_classification_task(classifier)
+task2 = create_validation_task(validator, context_task=task1)
+task3 = create_extraction_task(extractor, context_task=task2)
+task4 = create_review_task(reviewer, context_task=task3)
+task5 = create_consolidation_task(consolidator, validation_task=task2, review_task=task4)
+print("All tasks are defined and linked.")
 
-extraction_crew = Crew(
-    agents=[extractor_agent, validator_agent],
-    tasks=[extraction_task, validation_task],
+# Assemble the final crew
+crew = Crew(
+    agents=[classifier, validator, extractor, reviewer, consolidator],
+    tasks=[task1, task2, task3, task4, task5],
     process=Process.sequential,
     verbose=True
 )
 
+# --- EXECUTE THE CREW ---
 crew_inputs = {'invoice_text': invoice_text}
+print("\nKicking off the Full Document Processing Crew...")
+result = crew.kickoff(inputs=crew_inputs)
 
-print("\nKicking off the Entity Extraction Crew...")
-result = extraction_crew.kickoff(inputs=crew_inputs)
-
-print("\n\n Crew execution finished!")
+# --- PRINT THE FINAL,  RESULT ---
+print("\n\nCrew execution finished!")
 print("="*50)
-print("          Entity  SUMMARY")
+print("           REPORT ")
 print("="*50)
 
-final_pydantic_object = result.pydantic if hasattr(result, 'pydantic') else None
-
-if isinstance(final_pydantic_object, DynamicExtractionResult):
-    print_dynamic_summary(final_pydantic_object)
+# The result is now the 'FinalReport' Pydantic object, which is already clean.
+if hasattr(result, 'pydantic') and result.pydantic:
+    # Use .model_dump_json for a clean, indented JSON string output
+    print(result.pydantic.model_dump_json(indent=2))
 else:
     print("Could not parse the final structured output. Here is the raw result:")
     print(result)
