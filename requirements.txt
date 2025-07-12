@@ -1,0 +1,14 @@
+# requirements.txt
+crewai
+qdrant-client[fastembed]
+python-dotenv
+pydantic
+# For Document Processing
+pytesseract
+Pillow
+PyMuPDF
+# For RAG
+qdrant-client
+langchain # For the text splitter
+# For the custom LLM
+google-generativeai
