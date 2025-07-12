@@ -61,4 +61,4 @@ These steps are universal once Tesseract is installed.
     python main.py
     ```
 
-The system will prompt you for a question, process the document, and then print the final, structured summary report to the console.
+The system will process the document, and then print the final, structured summary report to the console.
